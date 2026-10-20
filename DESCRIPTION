@@ -11,7 +11,7 @@ Description: Describe how to split raster and vector data into batches
     metadata only, are checked against a column contract, and are read
     by any backend, so they suit dynamic branching in 'targets' and
     windowed reads with 'terra' or 'gdalraster'.
-License: GPL-3
+License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 4.1.0)
 Imports:
