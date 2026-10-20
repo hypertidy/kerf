@@ -20,6 +20,8 @@ test_that("GDAL arguments follow the selectors present", {
   expect_equal(kerf_gdal_args(ext_only),
                c("--bbox", "0,0.5,10,20", "--where", "kind = 'road'"))
   expect_error(kerf_gdal_args(p), "exactly one row")
-  expect_error(kerf_gdal_args(data.frame(batch = "a", fid_lo = 1, fid_hi = 2)),
+  expect_equal(kerf_gdal_args(data.frame(batch = "a", fid_lo = 1, fid_hi = 2)),
+               c("--where", "FID >= 1 AND FID <= 2"))
+  expect_error(kerf_gdal_args(data.frame(batch = "a", n_owned = 2)),
                "no window")
 })

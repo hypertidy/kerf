@@ -4,6 +4,7 @@ selector_groups <- list(
   window = c("xoff", "yoff", "xsize", "ysize"),
   extent = c("xmin", "ymin", "xmax", "ymax"),
   fid = c("fid_lo", "fid_hi"),
+  fids = "fids",
   where = "where",
   cells = c("cell_lo", "cell_hi", "cell_level")
 )
@@ -14,9 +15,11 @@ valid_rules <- c("centre", "point_in", "intersects", "clip")
 #'
 #' A plan is any data frame that meets this contract. Every selector group
 #' present in a row is a filter, and a row owns what all of its groups select
-#' together. A group is either absent or complete: all of its columns, with
-#' no missing values. Context groups repeat the selector groups with a
-#' `ctx_` prefix; when no context group is present, context equals owned.
+#' together. Within a row a group is either complete or entirely missing; a
+#' missing group does not constrain that row, but every row needs at least one
+#' owned group. Context groups repeat the selector groups with a `ctx_`
+#' prefix. When no context group is present, or a row's context group is
+#' missing, that row's context equals its owned selection.
 #'
 #' @return a data frame describing each column: its group, type, whether it
 #'   is required, and its meaning.
@@ -33,12 +36,14 @@ kerf_contract <- function() {
       "owned extent in the source CRS, half-open on the max edges"),
     c("fid", "fid_lo, fid_hi", "numeric", "one selector",
       "owned feature id range, inclusive"),
+    c("fids", "fids", "list of numeric", "one selector",
+      "owned feature id set, one vector per row"),
     c("where", "where", "character", "one selector",
       "owned attribute predicate, an OGR SQL fragment"),
     c("cells", "cell_lo, cell_hi, cell_level", "numeric", "one selector",
-      "owned interval of finest-level cell indices"),
+      "owned interval of Hilbert keys at a curve level"),
     c("context", "ctx_ + any selector group", "as above", "no",
-      "read-only context; must contain the owned selection"),
+      "read-only context containing the owned selection; NA = none"),
     c("rule", "rule", "character", "no",
       "ownership rule: centre, point_in, intersects or clip"),
     c("source", "dsn", "character", "no",
@@ -55,12 +60,15 @@ kerf_contract <- function() {
 #'
 #' Validates a plan, generated or hand-built. Without a source, the checks
 #' are structural: column groups complete, types and values valid, `batch`
-#' unique, context containing owned. With a raster source, owned windows must
-#' also lie on the grid and partition it exactly (no overlaps, no gaps), and
-#' context windows must lie on the grid.
+#' unique, FID ranges and sets not shared between batches, context containing
+#' owned. With a raster source, owned windows must also lie on the grid and
+#' partition it exactly (no overlaps, no gaps), and context windows must lie on
+#' the grid. With a vector source, FID ranges and sets must own every feature
+#' exactly once.
 #'
 #' @param plan a data frame.
-#' @param x optional source, anything [kerf_raster()] accepts.
+#' @param x optional source: anything [kerf_raster()] accepts for a plan with
+#'   windows, anything [kerf_vector()] accepts otherwise.
 #'
 #' @return the plan, invisibly, with `n_owned` filled in when it was missing
 #'   and can be computed. Problems are reported together in one error.
@@ -79,6 +87,7 @@ kerf_check <- function(plan, x = NULL) {
   if (nrow(plan) < 1L) stop("'plan' has no rows", call. = FALSE)
   problems <- character()
   add <- function(...) problems <<- c(problems, sprintf(...))
+  first <- function(i) paste(utils::head(plan$batch[i], 5L), collapse = ", ")
 
   ## identity
   if (!"batch" %in% names(plan)) {
@@ -94,8 +103,10 @@ kerf_check <- function(plan, x = NULL) {
     }
   }
 
-  ## selector groups, owned and context
+  ## selector groups, owned and context; selects[[g]] says which rows the
+  ## owned group g constrains (a row may leave a group entirely missing)
   present <- list()
+  selects <- list()
   for (prefix in c("", "ctx_")) {
     for (g in names(selector_groups)) {
       cols <- paste0(prefix, selector_groups[[g]])
@@ -103,20 +114,29 @@ kerf_check <- function(plan, x = NULL) {
       if (any(has) && !all(has)) {
         add("group '%s%s' is incomplete, missing: %s", prefix, g,
             paste(cols[!has], collapse = ", "))
-      } else if (all(has)) {
-        na <- vapply(plan[cols], anyNA, logical(1))
-        if (any(na)) {
-          add("group '%s%s' has missing values in: %s", prefix, g,
-              paste(cols[na], collapse = ", "))
-        }
-        present[[paste0(prefix, g)]] <- cols
+        next
       }
+      if (!all(has)) next
+      na <- as.matrix(as.data.frame(lapply(plan[cols], is_na_cell)))
+      partial <- rowSums(na) > 0 & rowSums(na) < length(cols)
+      if (any(partial)) {
+        add("group '%s%s' is partly missing for batch: %s", prefix, g,
+            first(partial))
+      }
+      present[[paste0(prefix, g)]] <- cols
+      if (prefix == "") selects[[g]] <- rowSums(na) == 0
     }
   }
   owned <- intersect(names(present), names(selector_groups))
   if (!length(owned)) {
     add("no owned selector group; need one of: %s",
         paste(names(selector_groups), collapse = ", "))
+  } else {
+    none <- Reduce(`+`, selects, 0) == 0
+    if (any(none)) {
+      add("no owned selection (every owned group missing) for batch: %s",
+          first(none))
+    }
   }
 
   for (prefix in c("", "ctx_")) {
@@ -126,6 +146,11 @@ kerf_check <- function(plan, x = NULL) {
     if (paste0(prefix, "extent") %in% names(present)) {
       problems <- c(problems, check_extent(plan, prefix))
     }
+  }
+  if ("fid" %in% names(present)) problems <- c(problems, check_fid_range(plan))
+  if ("fids" %in% names(present)) problems <- c(problems, check_fids(plan))
+  if ("where" %in% names(present) && !is.character(plan$where)) {
+    add("'where' must be character")
   }
 
   if ("rule" %in% names(plan)) {
@@ -139,25 +164,32 @@ kerf_check <- function(plan, x = NULL) {
   ## context contains owned
   if (all(c("window", "ctx_window") %in% names(present)) &&
       !length(problems)) {
-    inside <- plan$ctx_xoff <= plan$xoff & plan$ctx_yoff <= plan$yoff &
-      plan$ctx_xoff + plan$ctx_xsize >= plan$xoff + plan$xsize &
-      plan$ctx_yoff + plan$ctx_ysize >= plan$yoff + plan$ysize
+    has_ctx <- !is.na(plan$ctx_xoff)
+    inside <- !has_ctx |
+      (plan$ctx_xoff <= plan$xoff & plan$ctx_yoff <= plan$yoff &
+         plan$ctx_xoff + plan$ctx_xsize >= plan$xoff + plan$xsize &
+         plan$ctx_yoff + plan$ctx_ysize >= plan$yoff + plan$ysize)
     if (!all(inside)) {
       add("context window does not contain the owned window for batch: %s",
-          paste(utils::head(plan$batch[!inside], 5L), collapse = ", "))
+          first(!inside))
     }
   }
 
-  ## against a raster source
+  ## against a source
   if (!is.null(x) && !length(problems)) {
-    src <- kerf_raster(x)
-    for (prefix in c("", "ctx_")) {
-      if (paste0(prefix, "window") %in% names(present)) {
-        problems <- c(problems, check_bounds(plan, prefix, src$dimension))
+    if ("window" %in% names(present)) {
+      src <- kerf_raster(x)
+      for (prefix in c("", "ctx_")) {
+        if (paste0(prefix, "window") %in% names(present)) {
+          problems <- c(problems, check_bounds(plan, prefix, src$dimension))
+        }
       }
-    }
-    if ("window" %in% names(present) && !length(problems)) {
-      problems <- c(problems, check_partition(plan, src$dimension))
+      if (!length(problems)) {
+        problems <- c(problems, check_partition(plan, src$dimension))
+      }
+    } else if (any(c("fid", "fids") %in% names(present))) {
+      problems <- c(problems, check_vector_cover(plan, kerf_vector(x),
+                                                 present))
     }
   }
 
@@ -166,15 +198,25 @@ kerf_check <- function(plan, x = NULL) {
          call. = FALSE)
   }
 
-  if (!"n_owned" %in% names(plan) && "window" %in% names(present)) {
-    plan$n_owned <- as.numeric(plan$xsize) * plan$ysize
+  if (!"n_owned" %in% names(plan)) {
+    if ("window" %in% names(present)) {
+      plan$n_owned <- as.numeric(plan$xsize) * plan$ysize
+    } else if ("fids" %in% names(present)) {
+      plan$n_owned <- lengths(plan$fids)
+    }
   }
   invisible(plan)
 }
 
 ## ---- internals -------------------------------------------------------------
 
-is_whole <- function(v) is.numeric(v) && all(v == round(v))
+is_na_cell <- function(v) {
+  if (is.list(v)) return(vapply(v, function(e) length(e) == 1L && is.na(e),
+                                logical(1)))
+  is.na(v)
+}
+
+is_whole <- function(v) is.numeric(v) && all(v == round(v), na.rm = TRUE)
 
 check_window <- function(plan, prefix) {
   cols <- paste0(prefix, selector_groups$window)
@@ -184,15 +226,19 @@ check_window <- function(plan, prefix) {
     return(sprintf("window columns must be whole numbers: %s",
                    paste(cols[!whole], collapse = ", ")))
   }
-  if (any(plan[[cols[1L]]] < 0) || any(plan[[cols[2L]]] < 0)) {
+  if (any(plan[[cols[1L]]] < 0, na.rm = TRUE) ||
+      any(plan[[cols[2L]]] < 0, na.rm = TRUE)) {
     out <- c(out, sprintf("'%s' and '%s' must be >= 0", cols[1L], cols[2L]))
   }
-  if (any(plan[[cols[3L]]] < 1) || any(plan[[cols[4L]]] < 1)) {
+  if (any(plan[[cols[3L]]] < 1, na.rm = TRUE) ||
+      any(plan[[cols[4L]]] < 1, na.rm = TRUE)) {
     out <- c(out, sprintf("'%s' and '%s' must be >= 1", cols[3L], cols[4L]))
   }
   out
 }
 
+## owned extents are half-open and must have area; context extents only need
+## to be ordered (a context box around a single point has no area)
 check_extent <- function(plan, prefix) {
   cols <- paste0(prefix, selector_groups$extent)
   num <- vapply(plan[cols], is.numeric, logical(1))
@@ -200,14 +246,89 @@ check_extent <- function(plan, prefix) {
     return(sprintf("extent columns must be numeric: %s",
                    paste(cols[!num], collapse = ", ")))
   }
-  bad <- plan[[cols[3L]]] <= plan[[cols[1L]]] |
-    plan[[cols[4L]]] <= plan[[cols[2L]]]
+  dx <- plan[[cols[3L]]] - plan[[cols[1L]]]
+  dy <- plan[[cols[4L]]] - plan[[cols[2L]]]
+  bad <- if (prefix == "") dx <= 0 | dy <= 0 else dx < 0 | dy < 0
+  bad[is.na(bad)] <- FALSE
   if (any(bad)) {
-    return(sprintf("%sxmax/%symax must exceed %sxmin/%symin for batch: %s",
-                   prefix, prefix, prefix, prefix,
+    op <- if (prefix == "") "exceed" else "be at least"
+    return(sprintf("%sxmax/%symax must %s %sxmin/%symin for batch: %s",
+                   prefix, prefix, op, prefix, prefix,
                    paste(utils::head(plan$batch[bad], 5L), collapse = ", ")))
   }
   character()
+}
+
+check_fid_range <- function(plan) {
+  if (!is.numeric(plan$fid_lo) || !is.numeric(plan$fid_hi)) {
+    return("'fid_lo' and 'fid_hi' must be numeric")
+  }
+  plan <- plan[!is.na(plan$fid_lo), , drop = FALSE]
+  lo <- plan$fid_lo
+  hi <- plan$fid_hi
+  if (any(hi < lo)) {
+    return(sprintf("'fid_hi' is less than 'fid_lo' for batch: %s",
+                   paste(utils::head(plan$batch[hi < lo], 5L),
+                         collapse = ", ")))
+  }
+  o <- order(lo)
+  clash <- utils::tail(lo[o], -1L) <= utils::head(hi[o], -1L)
+  if (any(clash)) {
+    return(sprintf("FID ranges overlap for batch: %s",
+                   paste(utils::head(plan$batch[o][-1L][clash], 5L),
+                         collapse = ", ")))
+  }
+  character()
+}
+
+check_fids <- function(plan) {
+  f <- plan$fids
+  if (!is.list(f)) return("'fids' must be a list column")
+  keep <- !is_na_cell(f)
+  plan <- plan[keep, , drop = FALSE]
+  f <- f[keep]
+  ok <- vapply(f, function(e) is.numeric(e) && !anyNA(e), logical(1))
+  if (!all(ok)) {
+    return(sprintf("'fids' must hold numeric vectors without NA for batch: %s",
+                   paste(utils::head(plan$batch[!ok], 5L), collapse = ", ")))
+  }
+  all_f <- unlist(f, use.names = FALSE)
+  if (anyDuplicated(all_f)) {
+    dup <- unique(all_f[duplicated(all_f)])
+    hit <- vapply(f, function(e) any(e %in% dup), logical(1))
+    return(sprintf("FIDs are owned by more than one batch: %s",
+                   paste(utils::head(plan$batch[hit], 5L), collapse = ", ")))
+  }
+  character()
+}
+
+## FID ranges or sets must own every feature exactly once
+check_vector_cover <- function(plan, src, present) {
+  fid <- kerf_vector_index(src)$fid
+  count <- integer(length(fid))
+  if ("fids" %in% names(present)) {
+    f <- plan$fids[!is_na_cell(plan$fids)]
+    m <- match(unlist(f, use.names = FALSE), fid)
+    if (anyNA(m)) {
+      return("'fids' holds FIDs that are not in the source")
+    }
+    count <- tabulate(m, length(fid))
+  } else {
+    for (i in which(!is.na(plan$fid_lo))) {
+      hit <- fid >= plan$fid_lo[i] & fid <= plan$fid_hi[i]
+      count <- count + hit
+    }
+  }
+  out <- character()
+  if (any(count == 0L)) {
+    out <- c(out, sprintf("%i feature(s) are not owned by any batch",
+                          sum(count == 0L)))
+  }
+  if (any(count > 1L)) {
+    out <- c(out, sprintf("%i feature(s) are owned by more than one batch",
+                          sum(count > 1L)))
+  }
+  out
 }
 
 check_bounds <- function(plan, prefix, dm) {
@@ -216,6 +337,7 @@ check_bounds <- function(plan, prefix, dm) {
   xs <- plan[[paste0(prefix, "xsize")]]
   ys <- plan[[paste0(prefix, "ysize")]]
   bad <- xo + xs > dm[1L] | yo + ys > dm[2L]
+  bad[is.na(bad)] <- FALSE
   if (any(bad)) {
     return(sprintf("%swindow extends past the %i x %i grid for batch: %s",
                    prefix, dm[1L], dm[2L],
@@ -227,6 +349,7 @@ check_bounds <- function(plan, prefix, dm) {
 ## owned windows must tile the grid exactly: equal total area and no overlap
 ## (with every window in bounds, that is an exact partition)
 check_partition <- function(plan, dm) {
+  plan <- plan[!is.na(plan$xoff), , drop = FALSE]
   xo <- plan$xoff
   yo <- plan$yoff
   xs <- plan$xsize

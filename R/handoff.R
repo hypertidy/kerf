@@ -29,8 +29,9 @@ kerf_extents <- function(plan, role = c("owned", "context")) {
 #' Turns one plan row into arguments for the GDAL command line interface: a
 #' window becomes `--window` for `gdal raster clip`; an extent with no
 #' window becomes `--bbox`, accepted by `gdal raster clip` and
-#' `gdal vector filter`; a predicate becomes `--where` for
-#' `gdal vector filter`.
+#' `gdal vector filter`; an FID range, an FID set and a predicate become one
+#' `--where` for `gdal vector filter` (an FID set is written out as
+#' `FID IN (...)`, so very large sets make long arguments).
 #'
 #' @param plan a plan with exactly one row.
 #' @param role `"owned"` (the default) or `"context"`.
@@ -47,7 +48,8 @@ kerf_gdal_args <- function(plan, role = c("owned", "context")) {
   if (nrow(plan) != 1L) stop("'plan' must have exactly one row", call. = FALSE)
   prefix <- if (role == "context") "ctx_" else ""
   col <- function(nm) plan[[paste0(prefix, nm)]]
-  has <- function(nms) all(paste0(prefix, nms) %in% names(plan))
+  has <- function(nms) all(paste0(prefix, nms) %in% names(plan)) &&
+    !is.na(col(nms[1L])[1L])
   args <- character()
   if (has(c("xoff", "yoff", "xsize", "ysize"))) {
     args <- c(args, "--window",
@@ -59,9 +61,10 @@ kerf_gdal_args <- function(plan, role = c("owned", "context")) {
                                        col("xmax"), col("ymax"))),
                     collapse = ","))
   }
-  if (has("where")) args <- c(args, "--where", col("where"))
+  where <- owned_sql(plan, prefix)
+  if (!is.null(where)) args <- c(args, "--where", where)
   if (!length(args)) {
-    stop(sprintf("the %s selection has no window, extent or where group",
+    stop(sprintf("the %s selection has no window, extent, fid or where group",
                  role), call. = FALSE)
   }
   args

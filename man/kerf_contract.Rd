@@ -13,9 +13,11 @@ is required, and its meaning.
 \description{
 A plan is any data frame that meets this contract. Every selector group
 present in a row is a filter, and a row owns what all of its groups select
-together. A group is either absent or complete: all of its columns, with
-no missing values. Context groups repeat the selector groups with a
-\code{ctx_} prefix; when no context group is present, context equals owned.
+together. Within a row a group is either complete or entirely missing; a
+missing group does not constrain that row, but every row needs at least one
+owned group. Context groups repeat the selector groups with a \code{ctx_}
+prefix. When no context group is present, or a row's context group is
+missing, that row's context equals its owned selection.
 }
 \examples{
 kerf_contract()

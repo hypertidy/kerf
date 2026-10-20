@@ -8,16 +8,17 @@ kerf_reduce(parts, plan)
 }
 \arguments{
 \item{parts}{a list of results, one per plan row and in plan order:
-\code{SpatRaster}s or arrays as returned by \code{\link[=kerf_read]{kerf_read()}}.}
+\code{SpatRaster}s or arrays for raster plans, \code{SpatVector}s or data frames
+for vector plans, as returned by \code{\link[=kerf_read]{kerf_read()}}.}
 
 \item{plan}{the plan the parts were made from.}
 }
 \value{
-for \code{SpatRaster} parts, a single merged \code{SpatRaster}; for arrays,
-one array covering the union of owned windows, with a \code{"kerf_window"}
-attribute.
+a single merged \code{SpatRaster}; one array covering the union of owned
+windows, with a \code{"kerf_window"} attribute; or the owned rows of every
+part bound together, as a \code{SpatVector} or data frame.
 }
 \description{
-Trims each part to its owned window and assembles the parts. Because owned
-windows partition the grid, halos never double count.
+Trims each part to what its batch owns and assembles the parts. Because
+owned selections partition the input, context never double counts.
 }

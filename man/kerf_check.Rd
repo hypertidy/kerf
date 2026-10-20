@@ -9,7 +9,8 @@ kerf_check(plan, x = NULL)
 \arguments{
 \item{plan}{a data frame.}
 
-\item{x}{optional source, anything \code{\link[=kerf_raster]{kerf_raster()}} accepts.}
+\item{x}{optional source: anything \code{\link[=kerf_raster]{kerf_raster()}} accepts for a plan with
+windows, anything \code{\link[=kerf_vector]{kerf_vector()}} accepts otherwise.}
 }
 \value{
 the plan, invisibly, with \code{n_owned} filled in when it was missing
@@ -18,9 +19,11 @@ and can be computed. Problems are reported together in one error.
 \description{
 Validates a plan, generated or hand-built. Without a source, the checks
 are structural: column groups complete, types and values valid, \code{batch}
-unique, context containing owned. With a raster source, owned windows must
-also lie on the grid and partition it exactly (no overlaps, no gaps), and
-context windows must lie on the grid.
+unique, FID ranges and sets not shared between batches, context containing
+owned. With a raster source, owned windows must also lie on the grid and
+partition it exactly (no overlaps, no gaps), and context windows must lie on
+the grid. With a vector source, FID ranges and sets must own every feature
+exactly once.
 }
 \examples{
 g <- kerf_grid_spec(c(10, 10))

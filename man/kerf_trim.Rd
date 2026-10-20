@@ -2,22 +2,24 @@
 % Please edit documentation in R/read.R
 \name{kerf_trim}
 \alias{kerf_trim}
-\title{Trim a batch result to its owned window}
+\title{Trim a batch result to what it owns}
 \usage{
 kerf_trim(x, plan)
 }
 \arguments{
-\item{x}{a \code{SpatRaster} or an array from \code{\link[=kerf_read]{kerf_read()}}, or any result
-with the same geometry as the context read.}
+\item{x}{a result from \code{\link[=kerf_read]{kerf_read()}}, or any result with the same geometry
+or the same \code{kerf_owned} column.}
 
-\item{plan}{a plan with exactly one row and a window group.}
+\item{plan}{a plan with exactly one row.}
 }
 \value{
-\code{x} cut to the owned window.
+\code{x} cut to what the batch owns.
 }
 \description{
-Cuts a result read with context back to the cells the batch owns. A result
-that was read without context is returned unchanged.
+Cuts a result read with context back to the batch's own members: the owned
+window of a raster, or the features marked \code{kerf_owned} in a vector result
+(the marker column is dropped). A raster result read without context is
+returned unchanged.
 }
 \examples{
 if (requireNamespace("terra", quietly = TRUE)) {
