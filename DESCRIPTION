@@ -1,0 +1,31 @@
+Package: kerf
+Title: Plan Spatial Batches for Raster and Vector Processing
+Version: 0.0.0.9000
+Authors@R: person("Michael D.", "Sumner", email = "mdsumner@gmail.com",
+    role = c("aut", "cre"), comment = c(ORCID = "0000-0002-2471-7511"))
+Description: Describe how to split raster and vector data into batches
+    for parallel or pipelined processing. A plan is a plain data frame
+    with one row per batch, giving the members the batch owns (a raster
+    window, an extent, a feature range or a predicate) and, optionally, a
+    larger read-only context such as a halo of cells. Plans are made from
+    metadata only, are checked against a column contract, and are read
+    by any backend, so they suit dynamic branching in 'targets' and
+    windowed reads with 'terra' or 'gdalraster'.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.1.0)
+Imports:
+    grout,
+    methods
+Suggests:
+    gdalraster,
+    geotargets,
+    targets,
+    terra (>= 1.8-10),
+    testthat (>= 3.0.0),
+    withr
+URL: https://github.com/hypertidy/kerf
+BugReports: https://github.com/hypertidy/kerf/issues
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
