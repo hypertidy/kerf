@@ -18,8 +18,9 @@ a character vector of arguments.
 Turns one plan row into arguments for the GDAL command line interface: a
 window becomes \code{--window} for \verb{gdal raster clip}; an extent with no
 window becomes \code{--bbox}, accepted by \verb{gdal raster clip} and
-\verb{gdal vector filter}; a predicate becomes \code{--where} for
-\verb{gdal vector filter}.
+\verb{gdal vector filter}; an FID range, an FID set and a predicate become one
+\code{--where} for \verb{gdal vector filter} (an FID set is written out as
+\verb{FID IN (...)}, so very large sets make long arguments).
 }
 \examples{
 g <- kerf_grid_spec(c(100, 80), c(0, 1000, 0, 800))

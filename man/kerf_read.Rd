@@ -13,27 +13,29 @@ kerf_read(
 )
 }
 \arguments{
-\item{x}{the source: a \code{SpatRaster} (terra backend only), a character data
-source name, or a \code{"kerf_grid"} with a \code{dsn}.}
+\item{x}{the source: for rasters a \code{SpatRaster} (terra backend only), a
+character data source name, or a \code{"kerf_grid"} with a \code{dsn}; for vectors
+a data source name or a \code{"kerf_vector"} made from one.}
 
-\item{plan}{a plan with exactly one row and a window group.}
+\item{plan}{a plan with exactly one row.}
 
-\item{role}{\code{"context"} (the default) reads the context window when the
-plan has one, otherwise the owned window; \code{"owned"} reads the owned
-window.}
+\item{role}{\code{"context"} (the default) reads the context when the row has
+one, otherwise the owned selection; \code{"owned"} reads the owned selection.}
 
 \item{backend}{\code{"terra"} or \code{"gdalraster"}.}
 
-\item{band}{for the gdalraster backend, the bands to read; default all.}
+\item{band}{for the gdalraster raster backend, the bands to read; default
+all.}
 }
 \value{
-a \code{SpatRaster} or an array, see Details.
+a \code{SpatRaster}, array, \code{SpatVector} or data frame, see Details.
 }
 \description{
 Materialises one plan row. The plan decides \emph{what} is read; the backend
 decides \emph{how}.
 }
 \details{
+For a raster plan (one with a window group):
 \itemize{
 \item \code{backend = "terra"} returns a \code{SpatRaster} with its window set to the
 batch, so nothing is read until values are needed.
@@ -41,6 +43,19 @@ batch, so nothing is read until values are needed.
 \verb{[nrow, ncol, band]} carrying a \code{"kerf_window"} attribute
 \code{c(xoff, yoff, xsize, ysize)}. Arrays serialise without special
 handling, which suits pipeline targets.
+}
+
+For a vector plan, the owned features are read through an attribute filter
+built from the plan's FID range, FID set or \code{where} predicate. With
+\code{role = "context"} and a context extent, every feature whose bounding box
+meets that extent is read instead. Either way the result carries a logical
+column \code{kerf_owned} marking the batch's own features, which \code{\link[=kerf_trim]{kerf_trim()}}
+keeps.
+\itemize{
+\item \code{backend = "terra"} returns a \code{SpatVector}, with the FID in \code{kerf_fid}.
+\item \code{backend = "gdalraster"} returns the data frame from \code{GDALVector$fetch()},
+with the FID in \code{FID} and geometry as WKB. It serialises without special
+handling.
 }
 }
 \examples{

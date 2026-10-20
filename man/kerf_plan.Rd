@@ -7,11 +7,13 @@
 kerf_plan(x, keys, context = NULL)
 }
 \arguments{
-\item{x}{a source: anything \code{\link[=kerf_raster]{kerf_raster()}} accepts.}
+\item{x}{a source: anything \code{\link[=kerf_raster]{kerf_raster()}} accepts for raster
+generators, anything \code{\link[=kerf_vector]{kerf_vector()}} accepts for vector generators.}
 
-\item{keys}{a key generator, see \link{kerf_keys}.}
+\item{keys}{a key generator, see \link{kerf_keys} and \link{kerf_vector_keys}.}
 
-\item{context}{\code{NULL} for no context, or a context such as \code{\link[=kerf_halo]{kerf_halo()}}.}
+\item{context}{\code{NULL} for no context, \code{\link[=kerf_halo]{kerf_halo()}} for a raster or
+\code{\link[=kerf_buffer]{kerf_buffer()}} for a vector source.}
 }
 \value{
 a data frame.
@@ -21,13 +23,21 @@ Resolves a key generator, and optionally a context, against a source and
 returns the plan: a plain data frame with one row per batch.
 }
 \details{
-For a raster the columns are \code{batch}, the owned window \verb{xoff, yoff, xsize, ysize} (0-based pixel offsets and sizes, as GDAL uses them), the
-owned extent \verb{xmin, ymin, xmax, ymax}, the same groups prefixed \code{ctx_}
-when a context is given, \code{rule} (always \code{"centre"}) and \code{n_owned} (cells).
-See \code{\link[=kerf_contract]{kerf_contract()}} for the full contract.
+For a raster (\link{kerf_keys} generators) the columns are \code{batch}, the owned
+window \verb{xoff, yoff, xsize, ysize} (0-based pixel offsets and sizes, as GDAL
+uses them), the owned extent \verb{xmin, ymin, xmax, ymax}, the same groups
+prefixed \code{ctx_} when a \code{\link[=kerf_halo]{kerf_halo()}} is given, \code{rule} (always \code{"centre"})
+and \code{n_owned} (cells). \code{batch} is derived from the owned window's top-left
+offset.
 
-\code{batch} is derived from the owned window's top-left offset, so it is
-stable for a given source and generator and readable as a branch label.
+For a vector source (\link{kerf_vector_keys} generators) the owned selection is
+an FID range, an FID set (the list column \code{fids}) with its Hilbert key
+interval, or a \code{where} predicate, depending on the generator; a
+\code{\link[=kerf_buffer]{kerf_buffer()}} adds a \code{ctx_} extent. \code{n_owned} counts features.
+
+See \code{\link[=kerf_contract]{kerf_contract()}} for the full contract. Batch names are derived from
+the selection, so they are stable for a given source and generator and
+readable as branch labels.
 
 Because a plan is just a data frame, it can be filtered, sorted, written to
 Parquet or built by hand; \code{\link[=kerf_check]{kerf_check()}} validates it either way.

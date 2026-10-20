@@ -14,8 +14,9 @@ windowed reads with [terra](https://github.com/rspatial/terra) or
 
 A kerf is the cut a saw makes, and the width of that cut.
 
-This is an early, experimental package. The first milestone covers rasters;
-vector plans (feature ranges, predicates, spatial keys) come next.
+This is an early, experimental package. It covers raster plans (windows,
+with a halo of cells as context) and vector plans (FID ranges, Hilbert-ordered
+FID sets and attribute predicates, with a buffer as context).
 
 ## Owned and context
 
@@ -27,7 +28,10 @@ Every batch has two member sets.
   as a halo of cells for a focal operation.
 
 So a neighbourhood operation run batch by batch, each with a halo, then
-trimmed to its owned window, gives exactly the whole-grid answer.
+trimmed to its owned window, gives exactly the whole-grid answer. The same
+holds for vectors: count each owned feature's neighbours within a distance,
+using a buffer of that distance as context, and the batches together give
+the whole-layer counts.
 
 ## Example
 
@@ -52,6 +56,8 @@ out <- kerf_reduce(parts, p)
 
 ## Key generators
 
+For rasters:
+
 | Generator | Batches |
 | --- | --- |
 | `kerf_blocks(n_row, n_col)` | multiples of the source's native block size |
@@ -64,12 +70,33 @@ out <- kerf_reduce(parts, p)
 [geotargets](https://github.com/ropensci/geotargets), and `kerf_extents()`
 returns plan rows in the same form those helpers do.
 
+For vectors:
+
+| Generator | Batches | Owned selection |
+| --- | --- | --- |
+| `kerf_chunk(n)` | runs of `n` features in FID order | `fid_lo, fid_hi` |
+| `kerf_hilbert_chunk(n)` | about `n` features, compact along a Hilbert curve | `fids`, with key interval `cell_lo, cell_hi` |
+| `kerf_attribute(field)` | one per distinct value | `where` |
+
+Vector planning reads only FIDs and bounding boxes (`kerf_vector_index()`).
+A data frame with `fid, xmin, ymin, xmax, ymax` columns is also a source, so
+a plan can be made from a feature index produced by any tool, such as a slim
+`gdal vector sql` projection.
+
+```r
+f <- system.file("ex/lux.shp", package = "terra")
+p <- kerf_plan(f, kerf_hilbert_chunk(4), context = kerf_buffer(0.05))
+v <- kerf_read(f, p[1, ])   # owned features plus context, marked kerf_owned
+kerf_trim(v, p[1, ])        # just the owned features
+```
+
 ## The plan contract
 
 `kerf_contract()` prints the full contract. In short: `batch` is required,
 and each row needs at least one owned selector group. Every selector group
 present in a row is a filter, and the row owns what all of its groups
-select together.
+select together. A row may leave a group entirely missing, and then that
+group does not constrain it.
 
 | Group | Columns |
 | --- | --- |
@@ -77,6 +104,7 @@ select together.
 | window | `xoff, yoff, xsize, ysize` (0-based pixels, as GDAL uses) |
 | extent | `xmin, ymin, xmax, ymax` (half-open on the max edges) |
 | fid | `fid_lo, fid_hi` |
+| fids | `fids` (a list column of FID vectors) |
 | where | `where` (an OGR SQL fragment) |
 | cells | `cell_lo, cell_hi, cell_level` |
 | context | `ctx_` plus any selector group |
@@ -99,11 +127,13 @@ list(
 )
 ```
 
-With `backend = "gdalraster"`, `kerf_read()` returns plain arrays, which
-targets stores without any wrapping.
+With `backend = "gdalraster"`, `kerf_read()` returns plain arrays for rasters
+and plain data frames (geometry as WKB) for vectors, which targets stores
+without any wrapping.
 
 ## Handing rows to GDAL
 
 `kerf_gdal_args()` turns a plan row into arguments for the GDAL command line
 interface, such as `--window` for `gdal raster clip`, or `--bbox` and
-`--where` for `gdal vector filter`.
+`--where` for `gdal vector filter`. FID ranges and sets become `--where`
+clauses (`FID >= ... AND FID <= ...`, `FID IN (...)`).

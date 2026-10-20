@@ -16,3 +16,22 @@ make_tif <- function(ncol = 75L, nrow = 53L, block = 16L, nlyr = 1L) {
 skip_if_no_terra <- function() {
   testthat::skip_if_not_installed("terra", minimum_version = "1.8-10")
 }
+
+## random points in a GeoPackage, FIDs 1..n, with a grouping field
+make_points <- function(n = 400L, seed = 1L) {
+  set.seed(seed)
+  x <- stats::runif(n)
+  y <- stats::runif(n)
+  v <- terra::vect(cbind(x, y), crs = "EPSG:3031",
+                   atts = data.frame(id = seq_len(n),
+                                     grp = sample(c("a", "b", "c"), n, TRUE)))
+  f <- tempfile(fileext = ".gpkg")
+  terra::writeVector(v, f)
+  f
+}
+
+skip_if_no_vector <- function() {
+  skip_if_no_terra()
+  testthat::skip_if_not_installed("gdalraster")
+  testthat::skip_if_not_installed("wk")
+}

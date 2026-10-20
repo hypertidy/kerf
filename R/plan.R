@@ -3,21 +3,30 @@
 #' Resolves a key generator, and optionally a context, against a source and
 #' returns the plan: a plain data frame with one row per batch.
 #'
-#' For a raster the columns are `batch`, the owned window `xoff, yoff,
-#' xsize, ysize` (0-based pixel offsets and sizes, as GDAL uses them), the
-#' owned extent `xmin, ymin, xmax, ymax`, the same groups prefixed `ctx_`
-#' when a context is given, `rule` (always `"centre"`) and `n_owned` (cells).
-#' See [kerf_contract()] for the full contract.
+#' For a raster ([kerf_keys] generators) the columns are `batch`, the owned
+#' window `xoff, yoff, xsize, ysize` (0-based pixel offsets and sizes, as GDAL
+#' uses them), the owned extent `xmin, ymin, xmax, ymax`, the same groups
+#' prefixed `ctx_` when a [kerf_halo()] is given, `rule` (always `"centre"`)
+#' and `n_owned` (cells). `batch` is derived from the owned window's top-left
+#' offset.
 #'
-#' `batch` is derived from the owned window's top-left offset, so it is
-#' stable for a given source and generator and readable as a branch label.
+#' For a vector source ([kerf_vector_keys] generators) the owned selection is
+#' an FID range, an FID set (the list column `fids`) with its Hilbert key
+#' interval, or a `where` predicate, depending on the generator; a
+#' [kerf_buffer()] adds a `ctx_` extent. `n_owned` counts features.
+#'
+#' See [kerf_contract()] for the full contract. Batch names are derived from
+#' the selection, so they are stable for a given source and generator and
+#' readable as branch labels.
 #'
 #' Because a plan is just a data frame, it can be filtered, sorted, written to
 #' Parquet or built by hand; [kerf_check()] validates it either way.
 #'
-#' @param x a source: anything [kerf_raster()] accepts.
-#' @param keys a key generator, see [kerf_keys].
-#' @param context `NULL` for no context, or a context such as [kerf_halo()].
+#' @param x a source: anything [kerf_raster()] accepts for raster
+#'   generators, anything [kerf_vector()] accepts for vector generators.
+#' @param keys a key generator, see [kerf_keys] and [kerf_vector_keys].
+#' @param context `NULL` for no context, [kerf_halo()] for a raster or
+#'   [kerf_buffer()] for a vector source.
 #'
 #' @return a data frame.
 #' @export
@@ -34,6 +43,12 @@ kerf_plan <- function(x, keys, context = NULL) {
   if (!is.null(context) && !inherits(context, "kerf_context")) {
     stop("'context' must be NULL or a context such as kerf_halo()",
          call. = FALSE)
+  }
+  if (keys$type %in% vector_key_types) {
+    return(vector_plan(kerf_vector(x), keys, context))
+  }
+  if (!is.null(context) && context$type != "halo") {
+    stop("raster plans take kerf_halo() context", call. = FALSE)
   }
   src <- kerf_raster(x)
   w <- resolve_windows(src, keys)

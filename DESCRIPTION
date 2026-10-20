@@ -23,6 +23,7 @@ Suggests:
     targets,
     terra (>= 1.8-10),
     testthat (>= 3.0.0),
+    wk,
     withr
 URL: https://github.com/hypertidy/kerf
 BugReports: https://github.com/hypertidy/kerf/issues
